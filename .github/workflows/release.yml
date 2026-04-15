@@ -47,7 +47,7 @@ jobs:
 
       - name: Install source dependencies
         shell: bash
-        run: bun install --frozen-lockfile
+        run: bun install --frozen-lockfile --filter '@vidlatte/relay-agent'
         working-directory: source
 
       - name: Build vidlatte-server

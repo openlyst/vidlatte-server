@@ -1,0 +1,122 @@
+name: Build and Release vidlatte-server
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (example: v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux-x64
+            artifact_name: vidlatte-server-linux-x64
+          - os: macos-latest
+            label: macos-arm64
+            artifact_name: vidlatte-server-macos-arm64
+          - os: windows-latest
+            label: windows-x64
+            artifact_name: vidlatte-server-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout release repo
+        uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Clone source repository
+        shell: bash
+        run: git clone --depth 1 "https://gitlab.com/HttpAnimations/vidlatte.git" source
+
+      - name: Install source dependencies
+        shell: bash
+        run: bun install --frozen-lockfile
+        working-directory: source
+
+      - name: Build vidlatte-server
+        shell: bash
+        run: bun run --filter '@vidlatte/relay-agent' build
+        working-directory: source
+
+      - name: Prepare artifact (linux/macos)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p out
+          cp "source/vidlatte-server/dist/vidlatte-server" "out/${{ matrix.artifact_name }}"
+
+      - name: Prepare artifact (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $candidateA = "source/vidlatte-server/dist/vidlatte-server.exe"
+          $candidateB = "source/vidlatte-server/dist/vidlatte-server"
+          if (Test-Path $candidateA) {
+            Copy-Item $candidateA "out/${{ matrix.artifact_name }}"
+          } elseif (Test-Path $candidateB) {
+            Copy-Item $candidateB "out/${{ matrix.artifact_name }}"
+          } else {
+            Write-Error "Could not find compiled binary in source/vidlatte-server/dist"
+            exit 1
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: out/${{ matrix.artifact_name }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact files
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp artifacts/*/* release-assets/
+          ls -la release-assets
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          name: ${{ steps.release_tag.outputs.tag }}
+          files: release-assets/*
+          generate_release_notes: true

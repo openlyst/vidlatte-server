@@ -26,7 +26,7 @@ jobs:
             artifact_name: vidlatte-server-linux-x64
           - os: macos-latest
             label: macos-arm64
-            artifact_name: vidlatte-server-macos-arm64
+            artifact_name: vidlatte-server-macos-arm64.app.zip
           - os: windows-latest
             label: windows-x64
             artifact_name: vidlatte-server-windows-x64.exe
@@ -55,12 +55,56 @@ jobs:
         run: bun run --filter '@vidlatte/relay-agent' build
         working-directory: source
 
-      - name: Prepare artifact (linux/macos)
-        if: runner.os != 'Windows'
+      - name: Prepare artifact (linux)
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           mkdir -p out
           cp "source/vidlatte-server/dist/vidlatte-server" "out/${{ matrix.artifact_name }}"
+
+      - name: Prepare artifact (macos app bundle)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RELEASE_VERSION="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          APP_NAME="Vidlatte Server.app"
+          APP_ROOT="out/${APP_NAME}/Contents"
+          MACOS_DIR="${APP_ROOT}/MacOS"
+          mkdir -p "${MACOS_DIR}"
+          cp "source/vidlatte-server/dist/vidlatte-server" "${MACOS_DIR}/vidlatte-server"
+          chmod +x "${MACOS_DIR}/vidlatte-server"
+          cat > "${APP_ROOT}/Info.plist" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleDevelopmentRegion</key>
+            <string>en</string>
+            <key>CFBundleExecutable</key>
+            <string>vidlatte-server</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.openlyst.vidlatte-server</string>
+            <key>CFBundleInfoDictionaryVersion</key>
+            <string>6.0</string>
+            <key>CFBundleName</key>
+            <string>Vidlatte Server</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${RELEASE_VERSION}</string>
+            <key>CFBundleVersion</key>
+            <string>${{ github.run_number }}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>13.0</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+          </dict>
+          </plist>
+          PLIST
+          echo "APPL????" > "out/${APP_NAME}/Contents/PkgInfo"
+          ditto -c -k --sequesterRsrc --keepParent "out/${APP_NAME}" "out/${{ matrix.artifact_name }}"
+          rm -rf "out/${APP_NAME}"
 
       - name: Prepare artifact (windows)
         if: runner.os == 'Windows'

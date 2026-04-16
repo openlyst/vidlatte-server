@@ -107,7 +107,13 @@ jobs:
           EOF
           printf '%s' 'APPL????' > "${APP_ROOT}/PkgInfo"
           plutil -lint "${APP_ROOT}/Info.plist"
-          codesign --force --deep --sign - "out/${APP_NAME}"
+          # Bun --compile embeds a signature; --deep resign of the bundle then fails with
+          # "invalid or unsupported format for signature". Strip and sign the Mach-O, then the bundle.
+          EXE="${MACOS_DIR}/vidlatte-server"
+          codesign --remove-signature "${EXE}" 2>/dev/null || true
+          xattr -cr "out/${APP_NAME}" 2>/dev/null || true
+          codesign --force --sign - "${EXE}"
+          codesign --force --sign - "out/${APP_NAME}"
           ditto -c -k --sequesterRsrc --keepParent "out/${APP_NAME}" "out/${{ matrix.artifact_name }}"
           rm -rf "out/${APP_NAME}"
 

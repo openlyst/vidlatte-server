@@ -24,6 +24,9 @@ jobs:
           - os: ubuntu-latest
             label: linux-x64
             artifact_name: vidlatte-server-linux-x64
+          - os: ubuntu-latest
+            label: docker
+            artifact_name: vidlatte-server-docker-linux-amd64.tar.gz
           - os: macos-latest
             label: macos-arm64
             artifact_name: vidlatte-server-macos-arm64.app.zip
@@ -37,6 +40,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Bun
+        if: matrix.label != 'docker'
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -46,17 +50,35 @@ jobs:
         run: git clone --depth 1 "https://gitlab.com/HttpAnimations/vidlatte.git" source
 
       - name: Install source dependencies
+        if: matrix.label != 'docker'
         shell: bash
         run: bun install --frozen-lockfile --filter '@vidlatte/relay-agent'
         working-directory: source
 
       - name: Build vidlatte-server
+        if: matrix.label != 'docker'
         shell: bash
         run: bun run --filter '@vidlatte/relay-agent' build
         working-directory: source
 
+      - name: Build Docker image
+        if: matrix.label == 'docker'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source/vidlatte-server
+          docker build -t vidlatte-server:release .
+
+      - name: Export Docker image
+        if: matrix.label == 'docker'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          docker save vidlatte-server:release | gzip -c > "out/${{ matrix.artifact_name }}"
+
       - name: Prepare artifact (linux)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.label == 'linux-x64'
         shell: bash
         run: |
           mkdir -p out

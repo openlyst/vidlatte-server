@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -26,7 +27,6 @@ jobs:
             artifact_name: vidlatte-server-linux-x64
           - os: ubuntu-latest
             label: docker
-            artifact_name: vidlatte-server-docker-linux-amd64.tar.gz
           - os: macos-latest
             label: macos-arm64
             artifact_name: vidlatte-server-macos-arm64.app.zip
@@ -49,6 +49,25 @@ jobs:
         shell: bash
         run: git clone --depth 1 "https://gitlab.com/HttpAnimations/vidlatte.git" source
 
+      - name: Resolve release version (Docker)
+        id: docker_meta
+        if: matrix.label == 'docker'
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "version=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GitHub Container Registry
+        if: matrix.label == 'docker'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install source dependencies
         if: matrix.label != 'docker'
         shell: bash
@@ -69,13 +88,19 @@ jobs:
           cd source/vidlatte-server
           docker build -t vidlatte-server:release .
 
-      - name: Export Docker image
+      - name: Push Docker image to GHCR
         if: matrix.label == 'docker'
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out
-          docker save vidlatte-server:release | gzip -c > "out/${{ matrix.artifact_name }}"
+          VERSION="${{ steps.docker_meta.outputs.version }}"
+          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE="ghcr.io/${OWNER_LC}/vidlatte-server"
+          docker tag vidlatte-server:release "${IMAGE}:${VERSION}"
+          docker tag vidlatte-server:release "${IMAGE}:latest"
+          docker push "${IMAGE}:${VERSION}"
+          docker push "${IMAGE}:latest"
+          echo "Pushed ${IMAGE}:${VERSION} and ${IMAGE}:latest"
 
       - name: Prepare artifact (linux)
         if: runner.os == 'Linux' && matrix.label == 'linux-x64'
@@ -156,6 +181,7 @@ jobs:
           }
 
       - name: Upload build artifact
+        if: matrix.label != 'docker'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
